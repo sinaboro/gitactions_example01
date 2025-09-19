@@ -1,2 +1,7 @@
 server:
   port: 8080
+
+
+aws:
+  access-key: ABCDEFG
+  secret-key:  HIJKLMN
