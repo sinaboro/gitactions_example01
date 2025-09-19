@@ -1,13 +1,12 @@
 package com.example.gitactions;
 
-import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-@Controller
+@RestController
 public class GitActions {
     @GetMapping("/")
     public String home() {
-        System.out.println("---------home-----------");
-       return "index";
+       return "Hello, CICD";
     }
 }
