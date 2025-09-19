@@ -17,7 +17,7 @@ jobs:
           script: |
            cd /home/ubuntu/gitactions_example01  # 여기 경로는 자신의 EC2에 맞는 경로로 재작성하기
            git pull origin main
-           sudo chmod -x  gradlew
+           sudo chmod +x gradlew
            ./gradlew clean build
            sudo fuser -k -n tcp 8080 || true 
            nohup java -jar build/libs/*SNAPSHOT.jar > ./output.log 2>&1 &
