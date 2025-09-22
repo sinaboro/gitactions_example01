@@ -1,76 +1,51 @@
-name: Deploy To EC2                # 워크플로우 이름 (GitHub Actions UI에서 표시)
+name: Deploy To EC2
 
-on:                                # 실행 조건 정의
-  push:                            # push 이벤트 발생 시 실행
-    branches:                      # main 브랜치에 push 되었을 때만 실행
+on:
+  push:
+    branches:
       - main
 
-jobs:                              # 실행할 Job 정의
-  deploy:                          # Job 이름: deploy
-    runs-on: ubuntu-latest         # 실행 환경: Ubuntu 최신 이미지에서 동작
-    steps:                         # Job 안에서 실행할 단계들
-
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
       - name: Github Repository 파일 불러오기
-        uses: actions/checkout@v4  # 현재 GitHub 저장소의 코드를 runner로 가져옴
+        uses: actions/checkout@v4
 
       - name: JDK 17버전 설치
         uses: actions/setup-java@v4
         with:
-          distribution: temurin     # Java 배포판: Temurin
-          java-version: 17          # Java 버전: 17 설치
+          distribution: temurin
+          java-version: 17
 
       - name: application.yml 파일 만들기
         run: echo "${{ secrets.APPLICATION_PROPERTIES }}" > ./src/main/resources/application.yml
-        # GitHub Secrets에 저장된 문자열을 application.yml 파일로 저장
 
-      - name: 실행 권한
-        run: chmod +x gradlew       # gradlew 스크립트에 실행 권한 부여
+      - name: 권한설정
+        run: chmod +x gradlew
 
       - name: 테스트 및 빌드하기
         run: ./gradlew clean build -x test
-        # Gradle 빌드 실행 (clean 후 build, test 제외)
 
       - name: 빌드된 파일 이름 변경하기
         run: mv ./build/libs/*SNAPSHOT.jar ./project.jar
-        # 빌드 산출물 JAR 파일명을 project.jar로 통일 (SNAPSHOT 등 버전명 제거)
 
-      - name: EC2에 tobe 폴더 생성
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}          # EC2 호스트 주소
-          username: ${{ secrets.EC2_USERNAME }}  # EC2 접속 계정
-          key: ${{ secrets.EC2_PRIVATE_KEY }}    # SSH 개인키
-          script: mkdir -p /home/ubuntu/instagram-server/tobe
-          # -p 옵션으로 상위 디렉토리도 없으면 함께 생성
+      - name: 압축하기
+        run: tar -czvf $GITHUB_SHA.tar.gz project.jar appspec.yml scripts
 
-      - name: SCP로 EC2에 빌드된 파일 전송하기
-        uses: appleboy/scp-action@v0.1.7
+      - name: AWS Resource에 접근할 수 있게 AWS credentials 설정
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ secrets.EC2_HOST }}          # EC2 호스트 주소
-          username: ${{ secrets.EC2_USERNAME }}  # EC2 접속 계정
-          key: ${{ secrets.EC2_PRIVATE_KEY }}    # SSH 개인키
-          source: project.jar                    # 로컬에서 전송할 파일
-          target: /home/ubuntu/instagram-server/tobe/
-          # tobe 폴더가 반드시 존재하므로 안전하게 파일 업로드 가능
+          aws-region: ap-northeast-2
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: SSH로 EC2에 접속하기
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}          # EC2 호스트 주소
-          username: ${{ secrets.EC2_USERNAME }}  # EC2 접속 계정
-          key: ${{ secrets.EC2_PRIVATE_KEY }}    # SSH 개인키
-          script_stop: true                      # script 안에서 하나라도 실패 시 전체 실패 처리
-          script: |                              # 원격 EC2에서 실행할 명령어들
-            rm -rf /home/ubuntu/instagram-server/current
-                                                 # 기존 실행 중인 current 디렉토리 삭제
-            mkdir /home/ubuntu/instagram-server/current
-                                                 # current 디렉토리 새로 생성
-            mv /home/ubuntu/instagram-server/tobe/project.jar /home/ubuntu/instagram-server/current/project.jar
-                                                 # tobe 폴더에 전송된 JAR 파일을 current 폴더로 이동
-            cd /home/ubuntu/instagram-server/current
-                                                 # current 디렉토리로 이동
-            sudo fuser -k -n tcp 8080 || true    # 8080 포트 사용 중인 프로세스 종료 (없어도 무시)
-            nohup java -jar project.jar > ./output.log 2>&1 &
-                                                 # 새 JAR 실행 (백그라운드, 로그는 output.log에 기록)
-            rm -rf /home/ubuntu/instagram-server/tobe
-                                                 # tobe 폴더 정리 (임시 폴더 삭제)
+      - name: S3에 프로젝트 폴더 업로드하기
+        run: aws s3 cp --region ap-northeast-2 ./$GITHUB_SHA.tar.gz s3://instagram-server/$GITHUB_SHA.tar.gz
+
+      - name: Code Deploy를 활용해 EC2에 프로젝트 코드 배포
+        run: aws deploy create-deployment
+          --application-name instagram-server
+          --deployment-config-name CodeDeployDefault.AllAtOnce
+          --deployment-group-name Production
+          --s3-location bucket=instagram-server,bundleType=tgz,key=$GITHUB_SHA.tar.gz
