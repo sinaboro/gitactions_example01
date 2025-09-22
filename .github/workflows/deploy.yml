@@ -1,28 +1,35 @@
-name: Deploy To EC2
-on:
-  push:
-    branches:
-      - main
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH로 EC2에 접속하기
-        uses: appleboy/ssh-action@v1.0.3
+name: Deploy To EC2                  # 워크플로우 이름 (GitHub Actions 탭에서 표시됨)
+
+on:                                  # 언제 이 워크플로우를 실행할지 정의
+  push:                              # push 이벤트 발생 시 실행
+    branches: [ main ]               # main 브랜치에 push 되었을 때만 실행
+
+jobs:                                # 실행할 job 목록
+  deploy:                            # job 이름 (deploy)
+    runs-on: ubuntu-latest           # job이 실행될 GitHub Actions 러너 환경 (Ubuntu 최신 버전)
+
+    steps:                           # 단계별 실행 정의
+      - name: SSH로 EC2에 접속하기   # 단계 이름 (설명용, Actions UI에서 보임)
+        uses: appleboy/ssh-action@v1.0.3   # appleboy/ssh-action을 이용해 원격 SSH 접속 수행
         env:
-          APPLICATION_PROPERTIES: ${{secrets.APPLICATION_PROPERTIES}}
+          APPLICATION_PROPERTIES: ${{ secrets.APPLICATION_PROPERTIES }} # GitHub Secrets에서 애플리케이션 설정 가져오기
         with:
-          host: ${{ secrets.EC2_HOST }} # EC2의 주소
-          username: ${{ secrets.EC2_USERNAME }} # EC2 접속 username
-          key: ${{ secrets.EC2_PRIVATE_KEY }} # EC2의 Key 파일의 내부 텍스트
-          envs: APPLICATION_PROPERTIES
-          script_stop: true # 아래 script 중 실패하는 명령이 하나라도 있으면 실패로 처리
-          script: |
-           cd /home/ubuntu/gitactions_example01  # 여기 경로는 자신의 EC2에 맞는 경로로 재작성하기
-           rm -rf src/main/resources/application.yml 
-           git pull origin main
-           echo "$APPLICATION_PROPERTIES" > src/main/resources/application.yml
-           sudo chmod +x gradlew
-           ./gradlew clean build -x test
-           sudo fuser -k -n tcp 8080 || true 
-           nohup java -jar build/libs/*SNAPSHOT.jar > ./output.log 2>&1 &
+          host: ${{ secrets.EC2_HOST }}        # EC2 접속 host (퍼블릭 IP 또는 도메인)
+          username: ${{ secrets.EC2_USERNAME }} # EC2 접속 계정명 (예: ubuntu)
+          key: ${{ secrets.EC2_PRIVATE_KEY }}   # EC2 접속용 PEM 키 내용을 GitHub Secrets에서 불러옴
+          envs: APPLICATION_PROPERTIES          # 위에서 정의한 env 변수를 원격 환경에 전달
+          script_stop: true                     # script 안에서 에러가 나면 즉시 실패 처리
+          script: |                             # 아래부터 실행할 원격 쉘 스크립트
+            set -e                              # 스크립트 실행 중 에러 발생 시 즉시 종료
+            cd /home/ubuntu/gitactions_example01 # EC2에 있는 프로젝트 디렉토리로 이동
+            git fetch --all --prune             # 원격 브랜치 최신 정보 가져오고 불필요한 브랜치 제거
+            git reset --hard origin/main        # 현재 브랜치를 원격 main 브랜치 상태로 강제 초기화
+            rm -f src/main/resources/application.yml   # 기존 application.yml 삭제
+            printf "%s" "$APPLICATION_PROPERTIES" > src/main/resources/application.yml  
+                                                 # GitHub Secrets에서 가져온 환경설정을 application.yml 파일로 저장
+            chmod +x gradlew                    # gradlew 실행권한 부여
+            ./gradlew --no-daemon clean build -x test  
+                                                 # Gradle 빌드 (clean 후 build 실행, test는 제외)
+            sudo fuser -k -n tcp 8080 || true   # 8080 포트에서 실행 중인 프로세스가 있으면 종료, 실패해도 무시
+            nohup java -jar build/libs/*-SNAPSHOT.jar > ./output.log 2>&1 & 
+                                                 # 백그라운드로 새 JAR 실행, 로그는 output.log로 저장
