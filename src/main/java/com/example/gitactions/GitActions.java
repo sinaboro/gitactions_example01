@@ -7,6 +7,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class GitActions {
     @GetMapping("/")
     public String home() {
-       return "Hello, CICD1!!";
+       return "Hello, CICD2!!";
     }
 }
